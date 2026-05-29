@@ -26,7 +26,6 @@ animation/
 
 # Internal planning documents
 reports/
-CODEBASE-HEALTH-MAP.md
 RAILROAD_ARCHITECTURE.md
 .planning/
 analysis/
@@ -82,7 +81,3 @@ claude-test-command.md
 
 # Observability audit trail (issue #177) — append-only, local only
 .planning/.gsd-trace.jsonl
-
-# Local Crabbox machine configuration
-.crabbox.yaml
-.crabbox.local.yaml

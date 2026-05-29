@@ -1,7 +1,7 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: source-text-is-the-product
+// Workflow .md / agent .md / command .md / reference .md files — their text
+// IS what the runtime loads. Testing text content tests the deployed contract.
+// Per CONTRIBUTING.md exception matrix.
 
 /**
  * GSD Tools Tests - codex-config.cjs
@@ -2223,7 +2223,7 @@ describe('Codex uninstall symmetry for hook-enabled configs', () => {
     assert.strictEqual(countMatches(cleaned, /\[agents\.gsd-/g), 0, 'removes managed GSD agent sections');
   });
 
-  test('install then uninstall preserves a pre-existing quoted [features].\"codex_hooks\" = true', () => {
+  test('install then uninstall preserves a pre-existing quoted [features]."codex_hooks" = true', () => {
     writeCodexConfig(codexHome, [
       '[features]',
       '"codex_hooks" = true',

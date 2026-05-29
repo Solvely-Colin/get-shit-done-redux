@@ -1,7 +1,7 @@
-// allow-test-rule: pending-migration-to-typed-ir [#2974]
-// Tracked in #2974 for migration to typed-IR assertions per CONTRIBUTING.md
-// "Prohibited: Raw Text Matching on Test Outputs". Per-file review may
-// reclassify some entries as source-text-is-the-product during migration.
+// allow-test-rule: structural-regression-guard
+// Reads hook .js or bin/install.js source to assert structural invariants
+// (search array order, function wiring, path constants) that cannot be
+// verified by observing runtime outputs alone. Per CONTRIBUTING.md exception matrix.
 
 /**
  * GSD Tools Tests - core.cjs
@@ -505,9 +505,9 @@ describe('resolveModelInternal', () => {
 
   describe('resolve_model_ids: true', () => {
     // Regression test for #2712: MODEL_ALIAS_MAP must track current model releases.
-    test('opus alias resolves to claude-opus-4-7', () => {
+    test('opus alias resolves to claude-opus-4-8', () => {
       writeConfig({ resolve_model_ids: true, model_profile: 'quality' });
-      assert.strictEqual(resolveModelInternal(tmpDir, 'gsd-planner'), 'claude-opus-4-7');
+      assert.strictEqual(resolveModelInternal(tmpDir, 'gsd-planner'), 'claude-opus-4-8');
     });
 
     test('sonnet alias resolves to claude-sonnet-4-6', () => {

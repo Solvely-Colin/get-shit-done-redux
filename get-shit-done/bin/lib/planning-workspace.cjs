@@ -90,7 +90,7 @@ function withPlanningLock(cwd, fn) {
   // Ensure .planning/ exists
   try { platformEnsureDir(planningDir(cwd)); } catch { /* ok */ }
 
-  function runWithHeldLock() {
+  function acquireLock() {
     // Atomic create — fails if file exists
     fs.writeFileSync(lockPath, JSON.stringify({
       pid: process.pid,
@@ -99,8 +99,9 @@ function withPlanningLock(cwd, fn) {
     }), { flag: 'wx' });
 
     _heldPlanningLocks.add(lockPath);
+  }
 
-    // Lock acquired — run the function
+  function runWithHeldLock() {
     try {
       return fn();
     } finally {
@@ -116,12 +117,16 @@ function withPlanningLock(cwd, fn) {
   const sleepBuf = new Int32Array(new SharedArrayBuffer(4));
 
   while (Date.now() - start < lockTimeout) {
+    let lockWasAcquired = false;
     try {
+      acquireLock();
+      lockWasAcquired = true;
       return runWithHeldLock();
     } catch (err) {
       // Transient filesystem errors (Docker overlay-fs, NFS, OS signals, AV scanners)
       // are recoverable — wait and retry rather than propagating.
       // See PLANNING_LOCK_RETRY_ERRNOS for the full list and rationale.
+      if (lockWasAcquired) throw err;
       if (PLANNING_LOCK_RETRY_ERRNOS.has(err.code)) {
         Atomics.wait(sleepBuf, 0, 0, 100);
         continue;
@@ -146,6 +151,7 @@ function withPlanningLock(cwd, fn) {
 
   // Timeout — stale-lock recovery, then re-acquire atomically before entering critical section.
   try { fs.unlinkSync(lockPath); } catch { /* ok */ }
+  acquireLock();
   return runWithHeldLock();
 }
 

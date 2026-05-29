@@ -63,6 +63,7 @@ parentPort.postMessage({ done: true });
 // workerData: { planningWorkspaceCjsPath, cwd }
 const WRITER_WORKER_CODE = `
 const { parentPort, workerData } = require('worker_threads');
+const fs = require('fs');
 const RealSAB = global.SharedArrayBuffer;
 let sabCount = 0;
 // Stub: increments sabCount, calls through so Atomics.wait gets a real SAB-backed buffer.
@@ -72,6 +73,19 @@ function StubSAB(...args) {
 }
 StubSAB.prototype = RealSAB.prototype;
 global.SharedArrayBuffer = StubSAB;
+
+// Count atomic-create attempts on .planning/.lock. This proves the call entered
+// withPlanningLock's retry path; sabCount alone would also be 1 on a no-retry
+// success path, which would make the test a false-pass.
+const realWriteFileSync = fs.writeFileSync.bind(fs);
+let lockAttempts = 0;
+fs.writeFileSync = function(filePath, data, options) {
+  if (typeof filePath === 'string' && filePath.endsWith('.lock') &&
+      options && typeof options === 'object' && options.flag === 'wx') {
+    lockAttempts++;
+  }
+  return realWriteFileSync(filePath, data, options);
+};
 
 // Delete cache entry to ensure a fresh require picks up the stubbed constructor.
 // (The inline "new SharedArrayBuffer(4)" in withPlanningLock reads the global at
@@ -86,7 +100,7 @@ try {
 } catch (e) {
   callErr = (e && e.message) ? e.message : String(e);
 }
-parentPort.postMessage({ sabCount, callErr });
+parentPort.postMessage({ sabCount, lockAttempts, callErr });
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,20 +144,40 @@ describe('perf #407: withPlanningLock hoists sleep buffer — exactly one SAB pe
       // Worker A releases at 400ms.
       const holdMs = 400;
       let holderWorker;
+      let resolveLockWritten;
+      const lockWritten = new Promise((resolve) => { resolveLockWritten = resolve; });
       const holderDone = new Promise((resolve, reject) => {
         holderWorker = new Worker(HOLDER_WORKER_CODE, {
           eval: true,
           workerData: { lockPath, holdMs },
         });
-        holderWorker.on('message', (msg) => { if (msg.done) resolve(); });
-        holderWorker.on('error', reject);
+        holderWorker.on('message', (msg) => {
+          if (msg.pid !== undefined) resolveLockWritten();
+          if (msg.done) resolve();
+        });
+        holderWorker.on('error', (err) => {
+          resolveLockWritten();
+          reject(err);
+        });
         holderWorker.on('exit', (code) => {
+          resolveLockWritten();
           if (code !== 0) reject(new Error('Holder worker exit code: ' + code));
         });
       });
+      holderDone.catch(() => {});
 
-      // Give Worker A 80ms to write the lock file before starting Worker B.
-      await new Promise(resolve => setTimeout(resolve, 80));
+      let lockWrittenTimer;
+      const lockWrittenTimeout = new Promise((_, reject) => {
+        lockWrittenTimer = setTimeout(
+          () => reject(new Error('Holder worker did not post pid within 5000ms')),
+          5000
+        );
+      });
+      try {
+        await Promise.race([lockWritten, lockWrittenTimeout]);
+      } finally {
+        clearTimeout(lockWrittenTimer);
+      }
       assert.ok(fs.existsSync(lockPath), 'Worker A must have written the lock file');
 
       // ── Worker B: call withPlanningLock, measure SAB allocations ───────────
@@ -176,16 +210,23 @@ describe('perf #407: withPlanningLock hoists sleep buffer — exactly one SAB pe
         'at least one SharedArrayBuffer must be allocated (the sleep buffer must exist)'
       );
 
+      assert.ok(
+        writeResult.lockAttempts >= 2,
+        'SUT must have entered the retry path (>=1 failed lock attempt before success). ' +
+          'Got lockAttempts: ' + writeResult.lockAttempts
+      );
+
       // THE KEY INVARIANT:
       //   POST-FIX: sabCount === 1  (buffer allocated once, before the retry loop)
-      //   PRE-FIX:  sabCount >= 2   (new buffer on EVERY retry iteration)
-      //
-      // With a 400ms hold and 100ms per-spin wait, the pre-fix code observes sabCount >= 2.
+      //   PRE-FIX:  sabCount === lockAttempts (new buffer on EVERY iteration)
+      // Combined with lockAttempts >= 2 above, sabCount === 1 proves the
+      // buffer is hoisted and this did not pass on a no-retry path.
       assert.strictEqual(
         writeResult.sabCount,
         1,
         'post-fix: exactly one SharedArrayBuffer must be allocated per withPlanningLock call ' +
-          '(buffer hoisted before retry loop). Got: ' + writeResult.sabCount
+          '(buffer hoisted before retry loop). Got: ' + writeResult.sabCount +
+          ' across ' + writeResult.lockAttempts + ' lock attempts.'
       );
     }
   );

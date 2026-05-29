@@ -1043,6 +1043,15 @@ function releaseStateLock(lockPath) {
   try { fs.unlinkSync(lockPath); } catch { /* lock already gone */ }
 }
 
+function withStateLock(statePath, fn) {
+  const lockPath = acquireStateLock(statePath);
+  try {
+    return fn();
+  } finally {
+    releaseStateLock(lockPath);
+  }
+}
+
 /**
  * Write STATE.md with synchronized YAML frontmatter.
  * All STATE.md writes should use this instead of raw writeFileSync.
@@ -1981,6 +1990,8 @@ module.exports = {
   stateReplaceFieldWithFallback,
   writeStateMd,
   readModifyWriteStateMd,
+  syncStateFrontmatter,
+  withStateLock,
   updatePerformanceMetricsSection,
   cmdStateLoad,
   cmdStateGet,
